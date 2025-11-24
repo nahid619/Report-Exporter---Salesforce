@@ -1,6 +1,7 @@
 # exporter.py
 # Salesforce Report Exporter - Exports reports as CSV using the UI export method
 # Uses DYNAMIC API version matching the org
+# NOW WITH FOLDER SUPPORT!
 
 import time
 import tempfile
@@ -175,6 +176,8 @@ def clean_csv_footer(csv_content: str) -> str:
                         # Remove blank lines before footer
                         while cleaned_lines and not cleaned_lines[-1].strip():
                             cleaned_lines.pop()
+                    else:
+                        cleaned_lines.append(line)
                 else:
                     cleaned_lines.append(line)
         # Once footer starts, ignore all remaining lines
@@ -218,6 +221,7 @@ class SalesforceReportExporter:
         
         # Build endpoints with dynamic version
         self.reports_list_endpoint = f"/services/data/{self.api_version}/analytics/reports"
+        self.folders_list_endpoint = f"/services/data/{self.api_version}/folders"
         
         # Headers for REST API calls (list reports)
         self.api_headers = {
@@ -230,10 +234,41 @@ class SalesforceReportExporter:
             "sid": self.session_id
         }
 
-    def list_reports(self) -> List[Dict[str, Any]]:
+    def list_report_folders(self) -> List[Dict[str, Any]]:
+        """
+        Fetch list of all report folders in the org.
+        Returns list of folder metadata (id, name, type, etc.)
+        """
+        try:
+            # Query for Report folders specifically
+            url = f"{self.instance_url}/services/data/{self.api_version}/sobjects/Folder/describe"
+            response = retry_request(url, headers=self.api_headers, timeout=30)
+            
+            # Now query all folders of type Report
+            query = "SELECT Id, Name, Type, DeveloperName FROM Folder WHERE Type = 'Report' ORDER BY Name"
+            query_url = f"{self.instance_url}/services/data/{self.api_version}/query"
+            params = {"q": query}
+            
+            response = requests.get(query_url, headers=self.api_headers, params=params, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            folders = data.get("records", [])
+            
+            return folders
+            
+        except Exception as e:
+            raise Exception(f"Failed to fetch report folders: {str(e)}")
+
+    def list_reports(self, folder_id: str = None) -> List[Dict[str, Any]]:
         """
         Fetch list of all available reports using REST API.
-        Returns list of report metadata (id, name, format, etc.)
+        
+        Args:
+            folder_id: Optional folder ID to filter reports. If None, returns all reports.
+            
+        Returns:
+            List of report metadata (id, name, format, folder, etc.)
         """
         url = f"{self.instance_url}{self.reports_list_endpoint}"
         response = retry_request(url, headers=self.api_headers, timeout=60)
@@ -241,10 +276,17 @@ class SalesforceReportExporter:
         data = response.json()
         
         if isinstance(data, list):
-            return data
+            reports = data
         elif isinstance(data, dict):
-            return data.get("reports", data.get("records", []))
-        return []
+            reports = data.get("reports", data.get("records", []))
+        else:
+            reports = []
+        
+        # Filter by folder if specified
+        if folder_id:
+            reports = [r for r in reports if r.get("folderId") == folder_id]
+        
+        return reports
 
     def export_report_csv(self, report_id: str, timeout: int = 120) -> str:
         """
@@ -286,32 +328,45 @@ class SalesforceReportExporter:
         
         return cleaned_content
 
-    def export_all_reports_to_zip(
+    def export_reports_by_folder_to_zip(
         self,
         output_zip_path: str,
+        folder_id: str,
         delay_between_reports: float = 0.5
     ) -> Dict[str, Any]:
         """
-        Export all reports to a ZIP file.
+        Export all reports from a specific folder to a ZIP file.
+        
+        Args:
+            output_zip_path: Path where ZIP file will be saved
+            folder_id: The Salesforce folder ID to export reports from
+            delay_between_reports: Seconds to wait between exports (rate limiting)
+            
+        Returns:
+            Dictionary with export results
         """
         tmp_dir = Path(tempfile.mkdtemp(prefix="sf_reports_"))
 
         try:
-            # Step 1: Get list of all reports
-            reports = self.list_reports()
+            # Step 1: Get reports from this folder
+            reports = self.list_reports(folder_id=folder_id)
             total = len(reports)
             completed = 0
             failed: List[Dict[str, Any]] = []
             successful: List[str] = []
 
+            # Get folder name
+            folder_name = self._get_folder_name(folder_id)
+
             if total == 0:
                 with zipfile.ZipFile(output_zip_path, "w") as zf:
-                    zf.writestr("_README.txt", "No reports found in this Salesforce org.")
+                    zf.writestr("_README.txt", f"No reports found in folder: {folder_name}")
                 return {
                     "zip": output_zip_path,
                     "total": 0,
                     "failed": [],
                     "successful": [],
+                    "folder_name": folder_name,
                     "api_version": self.api_version
                 }
 
@@ -380,7 +435,7 @@ class SalesforceReportExporter:
                     if file_path.is_file():
                         zf.write(file_path, arcname=file_path.name)
                 
-                summary = self._create_summary(total, successful, failed)
+                summary = self._create_summary(total, successful, failed, folder_name)
                 zf.writestr("_EXPORT_SUMMARY.txt", summary)
 
             return {
@@ -388,6 +443,7 @@ class SalesforceReportExporter:
                 "total": total,
                 "failed": failed,
                 "successful": successful,
+                "folder_name": folder_name,
                 "api_version": self.api_version
             }
 
@@ -397,11 +453,135 @@ class SalesforceReportExporter:
             except Exception:
                 pass
 
+    def export_all_reports_to_zip(
+        self,
+        output_zip_path: str,
+        delay_between_reports: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Export ALL reports from ALL folders to a ZIP file.
+        """
+        tmp_dir = Path(tempfile.mkdtemp(prefix="sf_reports_"))
+
+        try:
+            # Step 1: Get list of all reports
+            reports = self.list_reports()
+            total = len(reports)
+            completed = 0
+            failed: List[Dict[str, Any]] = []
+            successful: List[str] = []
+
+            if total == 0:
+                with zipfile.ZipFile(output_zip_path, "w") as zf:
+                    zf.writestr("_README.txt", "No reports found in this Salesforce org.")
+                return {
+                    "zip": output_zip_path,
+                    "total": 0,
+                    "failed": [],
+                    "successful": [],
+                    "folder_name": "All Folders",
+                    "api_version": self.api_version
+                }
+
+            used_filenames: Dict[str, int] = {}
+
+            # Step 2: Export each report
+            for report in reports:
+                report_id = report.get("id")
+                report_name = report.get("name") or report_id
+                report_type = report.get("reportFormat", "TABULAR")
+
+                base_name = safe_filename(report_name)
+                if base_name in used_filenames:
+                    used_filenames[base_name] += 1
+                    filename = f"{base_name}_{used_filenames[base_name]}.csv"
+                else:
+                    used_filenames[base_name] = 1
+                    filename = f"{base_name}.csv"
+
+                csv_path = tmp_dir / filename
+
+                try:
+                    csv_content = self.export_report_csv(report_id)
+                    
+                    if not csv_content or len(csv_content.strip()) == 0:
+                        raise Exception("Empty response received")
+                    
+                    first_line = csv_content.split('\n')[0] if csv_content else ""
+                    if 'Error' in first_line and len(csv_content) < 500:
+                        raise Exception(f"Salesforce error: {first_line[:100]}")
+                    
+                    csv_path.write_text(csv_content, encoding="utf-8")
+                    successful.append(report_name)
+
+                except Exception as e:
+                    error_msg = str(e)
+                    failed.append({
+                        "id": report_id,
+                        "name": report_name,
+                        "type": report_type,
+                        "error": error_msg
+                    })
+                    error_content = (
+                        f"# Failed to export report\n"
+                        f"# Report Name: {report_name}\n"
+                        f"# Report ID: {report_id}\n"
+                        f"# Report Type: {report_type}\n"
+                        f"# Error: {error_msg}\n"
+                    )
+                    csv_path.write_text(error_content, encoding="utf-8")
+
+                completed += 1
+                
+                if self.progress_callback:
+                    try:
+                        self.progress_callback(completed, total)
+                    except Exception:
+                        pass
+
+                if delay_between_reports > 0 and completed < total:
+                    time.sleep(delay_between_reports)
+
+            # Step 3: Create ZIP file
+            with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for file_path in sorted(tmp_dir.iterdir()):
+                    if file_path.is_file():
+                        zf.write(file_path, arcname=file_path.name)
+                
+                summary = self._create_summary(total, successful, failed, "All Folders")
+                zf.writestr("_EXPORT_SUMMARY.txt", summary)
+
+            return {
+                "zip": output_zip_path,
+                "total": total,
+                "failed": failed,
+                "successful": successful,
+                "folder_name": "All Folders",
+                "api_version": self.api_version
+            }
+
+        finally:
+            try:
+                shutil.rmtree(tmp_dir)
+            except Exception:
+                pass
+
+    def _get_folder_name(self, folder_id: str) -> str:
+        """Get the name of a folder by its ID"""
+        try:
+            url = f"{self.instance_url}/services/data/{self.api_version}/sobjects/Folder/{folder_id}"
+            response = retry_request(url, headers=self.api_headers, timeout=30)
+            data = response.json()
+            return data.get("Name", folder_id)
+        except:
+            return folder_id
+
     def _create_summary(
         self,
         total: int,
         successful: List[str],
-        failed: List[Dict[str, Any]]
+        failed: List[Dict[str, Any]],
+        folder_name: str = "Unknown"
     ) -> str:
         """Create a summary text file for the export."""
         lines = [
@@ -410,6 +590,7 @@ class SalesforceReportExporter:
             f"Export Date: {time.strftime('%Y-%m-%d %H:%M:%S')}",
             f"Instance: {self.instance_url}",
             f"API Version: {self.api_version}",
+            f"Folder: {folder_name}",
             "",
             f"Total Reports: {total}",
             f"Successful: {len(successful)}",

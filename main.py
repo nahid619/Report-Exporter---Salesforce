@@ -22,19 +22,22 @@ class WorkerSignals(QObject):
     error = Signal(str)
     login_success = Signal(dict)
     login_error = Signal(str)
+    folders_loaded = Signal(list)
+    folders_error = Signal(str)
 
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Salesforce Reports Exporter")
-        self.resize(650, 580)
+        self.resize(650, 650)
         self.signals = WorkerSignals()
         self._connect_signals()
         self._setup_ui()
         self.session_info = None
         self.output_zip = None
         self._export_running = False
+        self.available_folders = []
 
     def _connect_signals(self):
         self.signals.progress.connect(self._on_progress)
@@ -43,6 +46,8 @@ class MainWindow(QWidget):
         self.signals.error.connect(self._on_export_error)
         self.signals.login_success.connect(self._on_login_success)
         self.signals.login_error.connect(self._on_login_error)
+        self.signals.folders_loaded.connect(self._on_folders_loaded)
+        self.signals.folders_error.connect(self._on_folders_error)
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -53,7 +58,7 @@ class MainWindow(QWidget):
         header.setStyleSheet("font-size: 16px; font-weight: bold; padding: 5px;")
         layout.addWidget(header)
 
-        subtitle = QLabel("Export all reports to a single ZIP file. Works on any org!")
+        subtitle = QLabel("Export reports by folder to a single ZIP file. Works on any org!")
         subtitle.setStyleSheet("color: #666; padding-bottom: 10px;")
         layout.addWidget(subtitle)
 
@@ -113,8 +118,34 @@ class MainWindow(QWidget):
         login_group.setLayout(login_layout)
         layout.addWidget(login_group)
 
+        # === FOLDER SELECTION SECTION ===
+        folder_group = QGroupBox("2. Select Report Folder")
+        folder_layout = QVBoxLayout()
+        
+        folder_combo_layout = QHBoxLayout()
+        self.folder_combo = QComboBox()
+        self.folder_combo.addItem("Loading folders...", None)
+        self.folder_combo.setEnabled(False)
+        self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
+        folder_combo_layout.addWidget(self.folder_combo, 1)
+        
+        self.refresh_folders_btn = QPushButton("Refresh")
+        self.refresh_folders_btn.setEnabled(False)
+        self.refresh_folders_btn.clicked.connect(self.on_refresh_folders)
+        folder_combo_layout.addWidget(self.refresh_folders_btn)
+        
+        folder_layout.addLayout(folder_combo_layout)
+        
+        self.folder_info_label = QLabel("Please login to see available folders")
+        self.folder_info_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.folder_info_label.setWordWrap(True)
+        folder_layout.addWidget(self.folder_info_label)
+        
+        folder_group.setLayout(folder_layout)
+        layout.addWidget(folder_group)
+
         # === OUTPUT SECTION ===
-        output_group = QGroupBox("2. Output Location")
+        output_group = QGroupBox("3. Output Location")
         output_layout = QHBoxLayout()
         self.path_label = QLabel("No file selected")
         self.path_label.setStyleSheet("color: #888;")
@@ -127,7 +158,7 @@ class MainWindow(QWidget):
         layout.addWidget(output_group)
 
         # === EXPORT SECTION ===
-        export_group = QGroupBox("3. Export")
+        export_group = QGroupBox("4. Export")
         export_layout = QVBoxLayout()
 
         self.start_btn = QPushButton("Start Export")
@@ -206,8 +237,13 @@ class MainWindow(QWidget):
         if user_name:
             self._log(f"User: {user_name}")
         
-        self._update_buttons()
         self._set_inputs_enabled(True)
+        
+        # Load folders automatically after login
+        self._log("Loading report folders...")
+        self.folder_combo.setEnabled(False)
+        self.folder_info_label.setText("Loading folders...")
+        self.on_refresh_folders()
 
     @Slot(str)
     def _on_login_error(self, error: str):
@@ -217,36 +253,66 @@ class MainWindow(QWidget):
         self._set_inputs_enabled(True)
         QMessageBox.critical(self, "Login Failed", error)
 
-    @Slot(dict)
-    def _on_export_finished(self, result: dict):
-        self._export_running = False
-        total = result.get("total", 0)
-        failed = result.get("failed", [])
-        zip_path = result.get("zip", "")
-
-        self.progress.setFormat(f"Done! {total} reports")
-        self._log(f"Export completed: {total} reports, {len(failed)} failed")
-
-        if failed:
-            self._log("Failed reports:")
-            for f in failed[:5]:
-                self._log(f"  • {f.get('name')}: {f.get('error')[:50]}")
-            if len(failed) > 5:
-                self._log(f"  ... and {len(failed) - 5} more")
-
-        self._set_inputs_enabled(True)
-        QMessageBox.information(
-            self, "Export Complete",
-            f"ZIP saved to:\n{zip_path}\n\nTotal: {total} reports\nFailed: {len(failed)}"
-        )
+    @Slot(list)
+    def _on_folders_loaded(self, folders: list):
+        self.available_folders = folders
+        self.folder_combo.clear()
+        
+        if not folders:
+            self.folder_combo.addItem("No folders found", None)
+            self.folder_info_label.setText("No report folders found in this org")
+            self.folder_combo.setEnabled(False)
+        else:
+            # Add "All Reports" option first
+            self.folder_combo.addItem("📁 All Reports (All Folders)", "ALL")
+            
+            # Add individual folders
+            for folder in folders:
+                folder_name = folder.get("name", "Unnamed")
+                folder_id = folder.get("id")
+                folder_type = folder.get("type", "")
+                
+                # Add icon based on folder type
+                icon = "📂"
+                if folder_type == "Public":
+                    icon = "🌐"
+                elif "My" in folder_name:
+                    icon = "👤"
+                
+                display_name = f"{icon} {folder_name}"
+                self.folder_combo.addItem(display_name, folder_id)
+            
+            self.folder_combo.setEnabled(True)
+            self.folder_info_label.setText(f"Found {len(folders)} folders with reports")
+            self._log(f"Loaded {len(folders)} report folders")
+        
+        self.refresh_folders_btn.setEnabled(True)
+        self._update_buttons()
 
     @Slot(str)
-    def _on_export_error(self, error: str):
-        self._export_running = False
-        self.progress.setFormat("Error")
-        self._log(f"Export failed: {error}")
-        self._set_inputs_enabled(True)
-        QMessageBox.critical(self, "Export Failed", error)
+    def _on_folders_error(self, error: str):
+        self.folder_combo.clear()
+        self.folder_combo.addItem("Error loading folders", None)
+        self.folder_info_label.setText(f"Error: {error}")
+        self.folder_combo.setEnabled(False)
+        self.refresh_folders_btn.setEnabled(True)
+        self._log(f"Error loading folders: {error}")
+
+    @Slot()
+    def _on_folder_changed(self):
+        current_data = self.folder_combo.currentData()
+        current_text = self.folder_combo.currentText()
+        
+        if current_data:
+            if current_data == "ALL":
+                self.folder_info_label.setText("Will export all reports from all folders")
+            else:
+                # Count reports in this folder
+                count = sum(1 for f in self.available_folders if f.get("id") == current_data)
+                folder_name = current_text.split(" ", 1)[1] if " " in current_text else current_text
+                self.folder_info_label.setText(f"Selected: {folder_name}")
+        
+        self._update_buttons()
 
     def _set_inputs_enabled(self, enabled: bool):
         self.username_input.setEnabled(enabled)
@@ -264,6 +330,7 @@ class MainWindow(QWidget):
             self.session_info is not None
             and self.output_zip is not None
             and not self._export_running
+            and self.folder_combo.currentData() is not None
         )
         self.start_btn.setEnabled(can_export)
 
@@ -313,6 +380,29 @@ class MainWindow(QWidget):
             self.signals.login_error.emit(str(e))
 
     @Slot()
+    def on_refresh_folders(self):
+        if not self.session_info:
+            return
+        
+        self.refresh_folders_btn.setEnabled(False)
+        self.folder_combo.setEnabled(False)
+        self.folder_info_label.setText("Loading folders...")
+        
+        thread = threading.Thread(target=self._load_folders_worker, daemon=True)
+        thread.start()
+
+    def _load_folders_worker(self):
+        try:
+            session_id = self.session_info.get("session_id")
+            instance_url = self.session_info.get("instance_url")
+            
+            exporter = SalesforceReportExporter(session_id, instance_url)
+            folders = exporter.list_report_folders()
+            self.signals.folders_loaded.emit(folders)
+        except Exception as e:
+            self.signals.folders_error.emit(str(e))
+
+    @Slot()
     def choose_path(self):
         default = f"salesforce_reports_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.zip"
         path, _ = QFileDialog.getSaveFileName(
@@ -338,17 +428,31 @@ class MainWindow(QWidget):
         if not self.output_zip:
             QMessageBox.warning(self, "No Output", "Please select output location.")
             return
+        
+        selected_folder_id = self.folder_combo.currentData()
+        if not selected_folder_id:
+            QMessageBox.warning(self, "No Folder Selected", "Please select a folder to export.")
+            return
 
         self._export_running = True
         self._set_inputs_enabled(False)
         self.progress.setValue(0)
         self.progress.setFormat("Starting...")
-        self._log("Starting export...")
+        
+        folder_name = self.folder_combo.currentText()
+        if selected_folder_id == "ALL":
+            self._log("Starting export of ALL reports from ALL folders...")
+        else:
+            self._log(f"Starting export from folder: {folder_name}")
 
-        thread = threading.Thread(target=self._export_worker, daemon=True)
+        thread = threading.Thread(
+            target=self._export_worker,
+            args=(selected_folder_id,),
+            daemon=True
+        )
         thread.start()
 
-    def _export_worker(self):
+    def _export_worker(self, folder_id):
         try:
             session_id = self.session_info.get("session_id")
             instance_url = self.session_info.get("instance_url")
@@ -359,10 +463,50 @@ class MainWindow(QWidget):
             exporter = SalesforceReportExporter(
                 session_id, instance_url, progress_callback=progress_cb
             )
-            result = exporter.export_all_reports_to_zip(self.output_zip)
+            
+            if folder_id == "ALL":
+                result = exporter.export_all_reports_to_zip(self.output_zip)
+            else:
+                result = exporter.export_reports_by_folder_to_zip(
+                    self.output_zip, 
+                    folder_id
+                )
+            
             self.signals.finished.emit(result)
         except Exception as e:
             self.signals.error.emit(str(e))
+
+    @Slot(dict)
+    def _on_export_finished(self, result: dict):
+        self._export_running = False
+        total = result.get("total", 0)
+        failed = result.get("failed", [])
+        zip_path = result.get("zip", "")
+        folder_name = result.get("folder_name", "selected folder")
+
+        self.progress.setFormat(f"Done! {total} reports")
+        self._log(f"Export completed: {total} reports from {folder_name}, {len(failed)} failed")
+
+        if failed:
+            self._log("Failed reports:")
+            for f in failed[:5]:
+                self._log(f"  • {f.get('name')}: {f.get('error')[:50]}")
+            if len(failed) > 5:
+                self._log(f"  ... and {len(failed) - 5} more")
+
+        self._set_inputs_enabled(True)
+        QMessageBox.information(
+            self, "Export Complete",
+            f"ZIP saved to:\n{zip_path}\n\nFolder: {folder_name}\nTotal: {total} reports\nFailed: {len(failed)}"
+        )
+
+    @Slot(str)
+    def _on_export_error(self, error: str):
+        self._export_running = False
+        self.progress.setFormat("Error")
+        self._log(f"Export failed: {error}")
+        self._set_inputs_enabled(True)
+        QMessageBox.critical(self, "Export Failed", error)
 
     def closeEvent(self, event):
         if self._export_running:
