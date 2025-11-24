@@ -110,6 +110,7 @@ def safe_filename(name: str, max_length: int = 100) -> str:
     return safe[:max_length] if safe else "unnamed_report"
 
 
+<<<<<<< HEAD
 def clean_csv_footer(csv_content: str) -> str:
     """
     Remove Salesforce's metadata footer from CSV content.
@@ -188,6 +189,8 @@ def clean_csv_footer(csv_content: str) -> str:
     return result
 
 
+=======
+>>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 class SalesforceReportExporter:
     """
     Export Salesforce reports to CSV files and package them into a ZIP.
@@ -254,7 +257,10 @@ class SalesforceReportExporter:
         - Bypasses the 2000 row API limit
         - Returns actual CSV content
         - Works with Lightning and Classic
+<<<<<<< HEAD
         - Automatically removes Salesforce metadata footer
+=======
+>>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
         """
         # Build the export URL - mimics clicking "Export" in the UI
         export_url = (
@@ -281,10 +287,14 @@ class SalesforceReportExporter:
             else:
                 raise Exception("Received HTML instead of CSV. Report may not be exportable.")
         
+<<<<<<< HEAD
         # Clean the CSV content (remove footer)
         cleaned_content = clean_csv_footer(content)
         
         return cleaned_content
+=======
+        return content
+>>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 
     def export_all_reports_to_zip(
         self,
