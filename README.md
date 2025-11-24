@@ -13,14 +13,9 @@ A portable, cross-platform desktop application to bulk-export all Salesforce rep
 Traditional Salesforce API tools require setting up a Connected App with OAuth configuration - this can be time-consuming and may not be possible if you're a consultant working on a client's org with limited admin access.
 
 **This tool uses SOAP login** which only requires:
-<<<<<<< HEAD
 
 - ✅ Username
 - ✅ Password
-=======
-- ✅ Username
-- ✅ Password  
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 - ✅ Security Token (optional if IP whitelisted)
 
 No Connected App setup needed!
@@ -43,15 +38,12 @@ No Connected App setup needed!
 git clone <repository-url>
 cd salesforce-report-exporter
 
-<<<<<<< HEAD
 # create virtual environment
 python -m venv venv
 
 # activate virtual environment
 venv\Scripts\activate
 
-=======
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 # 2. Install dependencies
 pip install -r requirements.txt
 
@@ -80,7 +72,6 @@ salesforce-report-exporter/
     └── FEATURES.md      # Feature documentation
 ```
 
-<<<<<<< HEAD
 ## How to create a executable .exe
 
 ```bash
@@ -95,8 +86,6 @@ pyinstaller --onefile --noconsole main.py
 
 ```
 
-=======
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 ## How It Works
 
 1. **SOAP Login**: Authenticates using Salesforce's SOAP Partner API
@@ -129,21 +118,12 @@ The session ID from SOAP login is interchangeable with OAuth access tokens for R
 
 ## Troubleshooting
 
-<<<<<<< HEAD
 | Error                       | Solution                                       |
 | --------------------------- | ---------------------------------------------- |
 | "Invalid username/password" | Check credentials and security token           |
 | "API not enabled"           | Contact admin to enable API access             |
 | "IP not whitelisted"        | Add security token to password OR whitelist IP |
 | "Session expired"           | Re-login and try again                         |
-=======
-| Error | Solution |
-|-------|----------|
-| "Invalid username/password" | Check credentials and security token |
-| "API not enabled" | Contact admin to enable API access |
-| "IP not whitelisted" | Add security token to password OR whitelist IP |
-| "Session expired" | Re-login and try again |
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 
 ## License
 
@@ -151,8 +131,4 @@ MIT License - See LICENSE file for details.
 
 ## Contributing
 
-<<<<<<< HEAD
 Contributions welcome! Please open an issue or submit a pull request.
-=======
-Contributions welcome! Please open an issue or submit a pull request.
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
