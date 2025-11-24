@@ -122,10 +122,22 @@ class MainWindow(QWidget):
         folder_group = QGroupBox("2. Select Report Folder")
         folder_layout = QVBoxLayout()
         
+        # Search box
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        self.folder_search = QLineEdit()
+        self.folder_search.setPlaceholderText("Type to filter folders...")
+        self.folder_search.textChanged.connect(self._on_search_changed)
+        self.folder_search.setEnabled(False)
+        search_layout.addWidget(self.folder_search, 1)
+        folder_layout.addLayout(search_layout)
+        
+        # Folder dropdown with refresh button
         folder_combo_layout = QHBoxLayout()
         self.folder_combo = QComboBox()
-        self.folder_combo.addItem("Loading folders...", None)
+        self.folder_combo.addItem("Please login first", None)
         self.folder_combo.setEnabled(False)
+        self.folder_combo.setMaxVisibleItems(10)  # Show max 10 items, rest scrollable
         self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
         folder_combo_layout.addWidget(self.folder_combo, 1)
         
@@ -255,39 +267,77 @@ class MainWindow(QWidget):
 
     @Slot(list)
     def _on_folders_loaded(self, folders: list):
-        self.available_folders = folders
+        # Filter out "Automated Process" and other system folders
+        filtered_folders = [
+            f for f in folders 
+            if f.get("name") and f.get("name") not in ["Automated Process", "System", "Hidden"]
+            and not f.get("name").startswith("__")
+        ]
+        
+        self.available_folders = filtered_folders
+        self._populate_folder_combo(filtered_folders)
+        
+        self.folder_search.setEnabled(True)
+        self.refresh_folders_btn.setEnabled(True)
+        self._update_buttons()
+    
+    
+    def _populate_folder_combo(self, folders: list, search_term: str = ""):
+        """Populate folder combo with filtered results"""
         self.folder_combo.clear()
         
         if not folders:
             self.folder_combo.addItem("No folders found", None)
             self.folder_info_label.setText("No report folders found in this org")
             self.folder_combo.setEnabled(False)
-        else:
-            # Add "All Reports" option first
-            self.folder_combo.addItem("📁 All Reports (All Folders)", "ALL")
-            
-            # Add individual folders
-            for folder in folders:
-                folder_name = folder.get("name", "Unnamed")
-                folder_id = folder.get("id")
-                folder_type = folder.get("type", "")
-                
-                # Add icon based on folder type
-                icon = "📂"
-                if folder_type == "Public":
-                    icon = "🌐"
-                elif "My" in folder_name:
-                    icon = "👤"
-                
-                display_name = f"{icon} {folder_name}"
-                self.folder_combo.addItem(display_name, folder_id)
-            
-            self.folder_combo.setEnabled(True)
-            self.folder_info_label.setText(f"Found {len(folders)} folders with reports")
-            self._log(f"Loaded {len(folders)} report folders")
+            return
         
-        self.refresh_folders_btn.setEnabled(True)
-        self._update_buttons()
+        # Filter by search term if provided
+        if search_term:
+            folders = [
+                f for f in folders 
+                if search_term.lower() in f.get("name", "").lower()
+            ]
+        
+        if not folders and search_term:
+            self.folder_combo.addItem(f"No folders matching '{search_term}'", None)
+            self.folder_combo.setEnabled(False)
+            self.folder_info_label.setText(f"No matches for '{search_term}'")
+            return
+        
+        # Add "All Reports" option first (always show unless searching)
+        if not search_term:
+            self.folder_combo.addItem("📁 All Reports (All Folders)", "ALL")
+        
+        # Add individual folders
+        for folder in folders:
+            folder_name = folder.get("name", "Unnamed")
+            folder_id = folder.get("id")
+            folder_type = folder.get("type", "")
+            
+            # Add icon based on folder type
+            icon = "📂"
+            if folder_type == "Public":
+                icon = "🌐"
+            elif "My" in folder_name:
+                icon = "👤"
+            
+            display_name = f"{icon} {folder_name}"
+            self.folder_combo.addItem(display_name, folder_id)
+        
+        self.folder_combo.setEnabled(True)
+        
+        if search_term:
+            self.folder_info_label.setText(f"Found {len(folders)} folders matching '{search_term}'")
+        else:
+            self.folder_info_label.setText(f"Found {len(folders)} folders available")
+            self._log(f"Loaded {len(folders)} report folders")
+    
+    @Slot()
+    def _on_search_changed(self):
+        """Handle search box text changes"""
+        search_term = self.folder_search.text().strip()
+        self._populate_folder_combo(self.available_folders, search_term)
 
     @Slot(str)
     def _on_folders_error(self, error: str):
@@ -323,6 +373,7 @@ class MainWindow(QWidget):
         self.custom_domain_input.setEnabled(enabled and self.custom_domain_check.isChecked())
         self.login_btn.setEnabled(enabled)
         self.choose_btn.setEnabled(enabled)
+        self.folder_search.setEnabled(enabled and self.session_info is not None)
         self._update_buttons()
 
     def _update_buttons(self):

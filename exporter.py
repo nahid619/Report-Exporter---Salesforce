@@ -236,26 +236,48 @@ class SalesforceReportExporter:
 
     def list_report_folders(self) -> List[Dict[str, Any]]:
         """
-        Fetch list of all report folders in the org.
+        Fetch list of all report folders in the org that the user has access to.
         Returns list of folder metadata (id, name, type, etc.)
+        Filters out system/automated folders.
         """
         try:
-            # Query for Report folders specifically
-            url = f"{self.instance_url}/services/data/{self.api_version}/sobjects/Folder/describe"
-            response = retry_request(url, headers=self.api_headers, timeout=30)
+            # Query for Report folders that user has access to
+            # Using SOQL to get folder details
+            query = """
+                SELECT Id, Name, Type, DeveloperName, AccessType 
+                FROM Folder 
+                WHERE Type = 'Report' 
+                AND Name != 'Automated Process'
+                ORDER BY Name
+            """
             
-            # Now query all folders of type Report
-            query = "SELECT Id, Name, Type, DeveloperName FROM Folder WHERE Type = 'Report' ORDER BY Name"
+            
             query_url = f"{self.instance_url}/services/data/{self.api_version}/query"
             params = {"q": query}
             
-            response = requests.get(query_url, headers=self.api_headers, params=params, timeout=30)
+            response = requests.get(
+                query_url, 
+                headers=self.api_headers, 
+                params=params, 
+                timeout=30
+            )
             response.raise_for_status()
             
             data = response.json()
             folders = data.get("records", [])
             
-            return folders
+            # Clean up the response - convert to simple dict
+            cleaned_folders = []
+            for folder in folders:
+                cleaned_folders.append({
+                    "id": folder.get("Id"),
+                    "name": folder.get("Name"),
+                    "type": folder.get("Type"),
+                    "developerName": folder.get("DeveloperName"),
+                    "accessType": folder.get("AccessType")
+                })
+            
+            return cleaned_folders
             
         except Exception as e:
             raise Exception(f"Failed to fetch report folders: {str(e)}")
