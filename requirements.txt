@@ -1,0 +1,8 @@
+# Salesforce Report Exporter - Dependencies
+# Python 3.10+ required
+
+# Qt UI Framework
+PySide6>=6.5.0
+
+# HTTP requests
+requests>=2.31.0
