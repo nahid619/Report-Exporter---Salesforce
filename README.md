@@ -79,10 +79,10 @@ salesforce-report-exporter/
 pip install pyinstaller
 
 #create a executable(if you have icon)
-pyinstaller --onefile --noconsole --icon=app.ico main.py
+pyinstaller --onefile --noconsole --name "ReportExporter" --icon=app.ico main.py
 
 #if it does not have a icon,
-pyinstaller --onefile --noconsole main.py
+pyinstaller --onefile --noconsole --name "ReportExporter" main.py
 
 ```
 
