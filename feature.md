@@ -1,6 +1,5 @@
 # Features Documentation
 
-<<<<<<< HEAD
 Complete feature list and technical specifications for the Salesforce Report Exporter.
 
 ## Table of Contents
@@ -25,22 +24,11 @@ Complete feature list and technical specifications for the Salesforce Report Exp
 
 #### How It Works
 
-=======
-Complete feature list and technical specifications.
-
-## Core Features
-
-### Universal SOAP Authentication
-
-**The key differentiator** - Works on ANY Salesforce org without setup.
-
-**How it works:**
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 1. User provides username + password + security token
 2. App sends SOAP login request to Salesforce Partner API
 3. Salesforce returns Session ID and Instance URL
 4. Session ID is used for all subsequent REST API calls
-<<<<<<< HEAD
+   <<<<<<< HEAD
 5. **API version auto-detected** from org after login
 
 #### Why This Matters
@@ -333,16 +321,17 @@ def __init__(self, session_id, instance_url, api_version=None):
 | **Analytics REST API** | 2,000 rows        | JSON format | ❌ Not used |
 | **UI Export URL**      | Org limit (200K+) | CSV format  | ✅ Used     |
 
-**UI Export URL Structure**:
-=======
+# **UI Export URL Structure**:
 
 **Why this matters:**
+
 - No Connected App configuration needed
 - No Consumer Key/Secret required
 - Works immediately on any org
 - Perfect for consultants and temporary access
 
 **Technical details:**
+
 - Uses SOAP Partner API v61.0
 - Session ID is interchangeable with OAuth access tokens
 - Supports Production, Sandbox, and Custom Domains
@@ -351,10 +340,10 @@ def __init__(self, session_id, instance_url, api_version=None):
 
 Seamlessly switch between environments:
 
-| Environment | Login URL | Use Case |
-|-------------|-----------|----------|
-| Production | login.salesforce.com | Live org |
-| Sandbox | test.salesforce.com | Dev/Test |
+| Environment   | Login URL                   | Use Case      |
+| ------------- | --------------------------- | ------------- |
+| Production    | login.salesforce.com        | Live org      |
+| Sandbox       | test.salesforce.com         | Dev/Test      |
 | Custom Domain | mycompany.my.salesforce.com | MyDomain orgs |
 
 ### Bulk Report Export
@@ -367,6 +356,7 @@ Automatically exports all accessible reports:
 4. Creates single ZIP with all reports
 
 **Specifications:**
+
 - REST API Version: v61.0
 - Output Format: CSV (UTF-8)
 - Compression: ZIP with DEFLATE
@@ -385,12 +375,12 @@ Responsive interface during long operations:
 
 ### Credential Handling
 
-| Feature | Implementation |
-|---------|----------------|
-| Storage | Memory only, never persisted |
-| Password | Masked input field |
-| Token | Masked input field |
-| Transmission | HTTPS only |
+| Feature      | Implementation               |
+| ------------ | ---------------------------- |
+| Storage      | Memory only, never persisted |
+| Password     | Masked input field           |
+| Token        | Masked input field           |
+| Transmission | HTTPS only                   |
 
 ### Security Token Support
 
@@ -424,7 +414,8 @@ Returns all reports the user has access to view.
 ### CSV Export
 
 Uses the UI export URL method (not the limited Analytics API):
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
+
+> > > > > > > 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 
 ```
 GET /{reportId}?isdtp=p1&export=1&enc=UTF-8&xf=csv
@@ -981,8 +972,10 @@ for attempt in range(3):
 - Memory released after completion
 
 ---
+
 =======
 **Why this method?**
+
 - Analytics REST API is limited to 2,000 rows
 - UI export method has no row limit (up to org limits)
 - Returns proper CSV, not JSON that needs conversion
@@ -990,24 +983,24 @@ for attempt in range(3):
 
 ### Supported Report Types
 
-| Type | Export Support | Notes |
-|------|----------------|-------|
-| Tabular | ✅ Full | Best results |
-| Summary | ✅ Full | Grouped data flattened |
-| Matrix | ⚠️ Limited | Converted to tabular |
-| Joined | ❌ No | API limitation |
+| Type    | Export Support | Notes                  |
+| ------- | -------------- | ---------------------- |
+| Tabular | ✅ Full        | Best results           |
+| Summary | ✅ Full        | Grouped data flattened |
+| Matrix  | ⚠️ Limited     | Converted to tabular   |
+| Joined  | ❌ No          | API limitation         |
 
 ### Error Handling
 
 Comprehensive error recovery:
 
-| Error | Response |
-|-------|----------|
+| Error            | Response                   |
+| ---------------- | -------------------------- |
 | 429 Rate Limited | Exponential backoff, retry |
-| 5xx Server Error | Retry up to 3 times |
-| 4xx Client Error | Log error, continue |
-| Network Timeout | Retry with longer timeout |
-| Parse Error | Log error, continue |
+| 5xx Server Error | Retry up to 3 times        |
+| 4xx Client Error | Log error, continue        |
+| Network Timeout  | Retry with longer timeout  |
+| Parse Error      | Log error, continue        |
 
 ### Filename Handling
 
@@ -1049,6 +1042,7 @@ Timestamped, scrollable log:
 ```
 
 Features:
+
 - Auto-scroll to latest
 - Clear button
 - Monospace font
@@ -1057,6 +1051,7 @@ Features:
 ### Status Indicators
 
 Visual feedback:
+
 - 🔴 Not logged in
 - 🟢 Logged in successfully
 - 🔴 Login failed
@@ -1065,10 +1060,10 @@ Visual feedback:
 
 ### API Versions
 
-| API | Version |
-|-----|---------|
-| SOAP Partner | 61.0 |
-| REST Analytics | v61.0 |
+| API            | Version |
+| -------------- | ------- |
+| SOAP Partner   | 61.0    |
+| REST Analytics | v61.0   |
 
 ### Rate Limiting
 
@@ -1082,13 +1077,13 @@ Built-in protection:
 
 Typical export speeds (varies by network):
 
-| Reports | Time |
-|---------|------|
-| 50 | ~20 seconds |
-| 100 | ~40 seconds |
-| 250 | ~2 minutes |
-| 500 | ~4 minutes |
-| 1000 | ~8 minutes |
+| Reports | Time        |
+| ------- | ----------- |
+| 50      | ~20 seconds |
+| 100     | ~40 seconds |
+| 250     | ~2 minutes  |
+| 500     | ~4 minutes  |
+| 1000    | ~8 minutes  |
 
 ### Memory Usage
 
@@ -1104,6 +1099,7 @@ Efficient resource handling:
 ### No Persistent Storage
 
 Nothing saved to disk:
+
 - No credentials file
 - No token cache
 - No session persistence
@@ -1112,6 +1108,7 @@ Nothing saved to disk:
 ### Secure Transmission
 
 All traffic encrypted:
+
 - HTTPS for all API calls
 - TLS 1.2+ required
 - Certificate validation enabled
@@ -1119,27 +1116,30 @@ All traffic encrypted:
 ### Minimal Permissions
 
 Only requires:
+
 - API Enabled permission
 - Read access to reports
 - No admin access needed
 
 ## Comparison: SOAP vs OAuth
 
-| Feature | This Tool (SOAP) | OAuth Tool |
-|---------|------------------|------------|
-| Setup required | None | Connected App |
-| Works on any org | ✅ Yes | ❌ Needs config |
-| Admin access needed | No | Yes (for setup) |
-| Security | Username + Token | Client ID + Secret |
-| Refresh tokens | No | Yes |
-| Best for | Quick access, consulting | Permanent integrations |
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
+| Feature             | This Tool (SOAP)         | OAuth Tool             |
+| ------------------- | ------------------------ | ---------------------- |
+| Setup required      | None                     | Connected App          |
+| Works on any org    | ✅ Yes                   | ❌ Needs config        |
+| Admin access needed | No                       | Yes (for setup)        |
+| Security            | Username + Token         | Client ID + Secret     |
+| Refresh tokens      | No                       | Yes                    |
+| Best for            | Quick access, consulting | Permanent integrations |
+
+> > > > > > > 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
 
 ## Limitations
 
 ### Known Limitations
 
 <<<<<<< HEAD
+
 #### 1. Joined Reports
 
 **Issue**: Cannot be exported via API
@@ -1336,8 +1336,8 @@ Planned features for future releases:
 
 ---
 
-**Need more details?** See [USER_GUIDE.md](USER_GUIDE.md) for usage instructions and [SETUP_GUIDE.md](SETUP_GUIDE.md) for installation steps.
-=======
+# **Need more details?** See [USER_GUIDE.md](USER_GUIDE.md) for usage instructions and [SETUP_GUIDE.md](SETUP_GUIDE.md) for installation steps.
+
 1. **Joined Reports**: Cannot be exported via API
 2. **Very Large Reports**: May timeout (try smaller date ranges)
 3. **Real-time Data**: Snapshot at time of export
@@ -1361,4 +1361,4 @@ Planned features:
 - [ ] Standalone executables (.exe/.app)
 - [ ] Command-line interface
 - [ ] Export history logging
->>>>>>> 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
+  > > > > > > > 64f2d5b4c0b8f78afb07be5b46f45f4510a5daf3
