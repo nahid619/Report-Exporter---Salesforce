@@ -33,7 +33,7 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Salesforce Reports Exporter")
-        self.resize(700, 750)
+        self.resize(700, 600)
         self.signals = WorkerSignals()
         self._connect_signals()
         self._setup_ui()
@@ -58,8 +58,21 @@ class MainWindow(QWidget):
         self.signals.reports_error.connect(self._on_reports_error)    # NEW
 
     def _setup_ui(self):
-        layout = QVBoxLayout(self)
+        # Main layout with scroll area
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Create scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # Create container widget for scroll area
+        container = QWidget()
+        layout = QVBoxLayout(container)
         layout.setSpacing(8)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         # Header
         header = QLabel("Salesforce Report Exporter")
@@ -128,7 +141,7 @@ class MainWindow(QWidget):
 
         # === EXPORT MODE TABS ===
         self.export_tabs = QTabWidget()
-        self.export_tabs.setEnabled(False)  # Disabled until login
+        self.export_tabs.setEnabled(False)
         
         # Tab 1: Export by Folder
         self.folder_tab = self._create_folder_tab()
@@ -189,9 +202,14 @@ class MainWindow(QWidget):
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMaximumHeight(120)
+        self.log.setMinimumHeight(100)
+        self.log.setMaximumHeight(150)
         self.log.setStyleSheet("font-family: Consolas, Monaco, monospace; font-size: 11px;")
         layout.addWidget(self.log)
+        
+        # Set container to scroll area
+        scroll_area.setWidget(container)
+        main_layout.addWidget(scroll_area)
 
     def _create_folder_tab(self):
         """Create the folder-based export tab"""
