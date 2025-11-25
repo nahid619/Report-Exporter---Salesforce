@@ -382,7 +382,6 @@ class MainWindow(QWidget):
             return
         
         # Get the directory and base filename
-        import os
         directory = os.path.dirname(self.output_zip)
         
         # Sanitize folder name for filename
