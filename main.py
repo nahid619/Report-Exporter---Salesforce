@@ -7,8 +7,9 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QLabel, QProgressBar, QTextEdit, QMessageBox,
     QLineEdit, QComboBox, QGroupBox, QFormLayout, QCheckBox,
-    QTabWidget, QScrollArea, QFrame
+    QTabWidget, QScrollArea, QFrame, QSizePolicy
 )
+
 from PySide6.QtCore import Signal, Slot, QObject, Qt
 from PySide6.QtGui import QFont
 from salesforce_auth import SalesforceAuth
@@ -56,43 +57,49 @@ class MainWindow(QWidget):
         self.signals.folders_error.connect(self._on_folders_error)
         self.signals.reports_loaded.connect(self._on_reports_loaded)  # NEW
         self.signals.reports_error.connect(self._on_reports_error)    # NEW
-
+    
     def _setup_ui(self):
-        # Main layout with scroll area
+        # Detect screen size for better scaling
+        screen = QApplication.primaryScreen()
+        geom = screen.availableGeometry()
+        screen_w, screen_h = geom.width(), geom.height()
+
+        # Main layout using scroll area
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Create scroll area
+
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        
-        # Create container widget for scroll area
+
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setSpacing(8)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
 
         # Header
         header = QLabel("Salesforce Report Exporter")
-        header.setStyleSheet("font-size: 16px; font-weight: bold; padding: 5px;")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; padding: 6px;")
+        header.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout.addWidget(header)
 
         subtitle = QLabel("Export reports by folder or select specific reports. Works on any org!")
-        subtitle.setStyleSheet("color: #666; padding-bottom: 10px;")
+        subtitle.setStyleSheet("color: #666; padding-bottom: 12px;")
+        subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
         # === LOGIN SECTION ===
         login_group = QGroupBox("1. Salesforce Login")
         login_layout = QFormLayout()
-        login_layout.setSpacing(8)
+        login_layout.setSpacing(10)
 
         # Environment selector
         env_layout = QHBoxLayout()
         self.env_combo = QComboBox()
         self.env_combo.addItem("Production", "login")
         self.env_combo.addItem("Sandbox", "test")
+        self.env_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         env_layout.addWidget(self.env_combo)
         env_layout.addStretch()
         login_layout.addRow("Environment:", env_layout)
@@ -127,7 +134,8 @@ class MainWindow(QWidget):
 
         # Login button
         self.login_btn = QPushButton("Login")
-        self.login_btn.setMinimumHeight(32)
+        self.login_btn.setMinimumHeight(34)
+        self.login_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.login_btn.clicked.connect(self.on_login)
         login_layout.addRow("", self.login_btn)
 
@@ -142,42 +150,46 @@ class MainWindow(QWidget):
         # === EXPORT MODE TABS ===
         self.export_tabs = QTabWidget()
         self.export_tabs.setEnabled(False)
-        
-        # Tab 1: Export by Folder
+        self.export_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         self.folder_tab = self._create_folder_tab()
         self.export_tabs.addTab(self.folder_tab, "📁 Export by Folder")
-        
-        # Tab 2: Export Selected Reports
+
         self.selected_tab = self._create_selected_reports_tab()
         self.export_tabs.addTab(self.selected_tab, "☑️ Export Selected Reports")
-        
+
         layout.addWidget(self.export_tabs)
 
-        # === OUTPUT SECTION (Shared) ===
+        # === OUTPUT SECTION ===
         output_group = QGroupBox("3. Output Location")
         output_layout = QHBoxLayout()
         self.path_label = QLabel("No file selected")
         self.path_label.setStyleSheet("color: #888;")
         self.path_label.setWordWrap(True)
-        output_layout.addWidget(self.path_label, 1)
+        self.path_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
         self.choose_btn = QPushButton("Browse...")
         self.choose_btn.clicked.connect(self.choose_path)
-        output_layout.addWidget(self.choose_btn)
+
+        output_layout.addWidget(self.path_label, 2)
+        output_layout.addWidget(self.choose_btn, 1)
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
-        # === EXPORT SECTION (Shared) ===
+        # === EXPORT SECTION ===
         export_group = QGroupBox("4. Export")
         export_layout = QVBoxLayout()
 
         self.start_btn = QPushButton("Start Export")
-        self.start_btn.setMinimumHeight(38)
+        self.start_btn.setMinimumHeight(42)
         self.start_btn.setEnabled(False)
         self.start_btn.clicked.connect(self.on_start)
+        self.start_btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.start_btn.setStyleSheet("""
             QPushButton:enabled { background-color: #0070d2; color: white; font-weight: bold; }
             QPushButton:disabled { background-color: #ccc; color: #888; }
         """)
+
         export_layout.addWidget(self.start_btn)
 
         self.progress = QProgressBar()
@@ -185,31 +197,36 @@ class MainWindow(QWidget):
         self.progress.setValue(0)
         self.progress.setTextVisible(True)
         self.progress.setFormat("Ready")
+        self.progress.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         export_layout.addWidget(self.progress)
 
         export_group.setLayout(export_layout)
         layout.addWidget(export_group)
 
         # === LOG SECTION ===
-        log_layout = QHBoxLayout()
-        log_layout.addWidget(QLabel("Log:"))
-        log_layout.addStretch()
+        log_header = QHBoxLayout()
+        log_header.addWidget(QLabel("Log:"))
+        log_header.addStretch()
+
         clear_btn = QPushButton("Clear")
-        clear_btn.setMaximumWidth(60)
+        clear_btn.setMaximumWidth(70)
         clear_btn.clicked.connect(lambda: self.log.clear())
-        log_layout.addWidget(clear_btn)
-        layout.addLayout(log_layout)
+        log_header.addWidget(clear_btn)
+
+        layout.addLayout(log_header)
 
         self.log = QTextEdit()
         self.log.setReadOnly(True)
-        self.log.setMinimumHeight(100)
-        self.log.setMaximumHeight(150)
+        self.log.setMinimumHeight(int(screen_h * 0.15))   # 15% of screen height
+        self.log.setMaximumHeight(int(screen_h * 0.30))   # 30% of screen height
+        self.log.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.log.setStyleSheet("font-family: Consolas, Monaco, monospace; font-size: 11px;")
         layout.addWidget(self.log)
-        
-        # Set container to scroll area
+
+        # Add container to scroll area
         scroll_area.setWidget(container)
         main_layout.addWidget(scroll_area)
+
 
     def _create_folder_tab(self):
         """Create the folder-based export tab"""
