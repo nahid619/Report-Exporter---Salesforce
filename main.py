@@ -1,16 +1,16 @@
-# main.py
-# Universal Salesforce Report Exporter - Works on ANY org without Connected App
+# main.py - UPDATED WITH DUAL MODE EXPORT
 import os
 import sys
 import threading
-import traceback
 import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QFileDialog, QLabel, QProgressBar, QTextEdit, QMessageBox,
-    QLineEdit, QComboBox, QGroupBox, QFormLayout, QCheckBox
+    QLineEdit, QComboBox, QGroupBox, QFormLayout, QCheckBox,
+    QTabWidget, QScrollArea, QFrame
 )
-from PySide6.QtCore import Signal, Slot, QObject
+from PySide6.QtCore import Signal, Slot, QObject, Qt
+from PySide6.QtGui import QFont
 from salesforce_auth import SalesforceAuth
 from exporter import SalesforceReportExporter
 
@@ -25,13 +25,15 @@ class WorkerSignals(QObject):
     login_error = Signal(str)
     folders_loaded = Signal(list)
     folders_error = Signal(str)
+    reports_loaded = Signal(list)  # NEW: For loading all reports
+    reports_error = Signal(str)    # NEW: For report loading errors
 
 
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Salesforce Reports Exporter")
-        self.resize(650, 650)
+        self.resize(700, 750)
         self.signals = WorkerSignals()
         self._connect_signals()
         self._setup_ui()
@@ -39,7 +41,9 @@ class MainWindow(QWidget):
         self.output_zip = None
         self._export_running = False
         self.available_folders = []
-        self.selected_folder_name = "All_Reports" 
+        self.available_reports = []  # NEW: Store all reports
+        self.selected_reports = set()  # NEW: Store selected report IDs
+        self.selected_folder_name = "All_Reports"
 
     def _connect_signals(self):
         self.signals.progress.connect(self._on_progress)
@@ -50,6 +54,8 @@ class MainWindow(QWidget):
         self.signals.login_error.connect(self._on_login_error)
         self.signals.folders_loaded.connect(self._on_folders_loaded)
         self.signals.folders_error.connect(self._on_folders_error)
+        self.signals.reports_loaded.connect(self._on_reports_loaded)  # NEW
+        self.signals.reports_error.connect(self._on_reports_error)    # NEW
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -60,7 +66,7 @@ class MainWindow(QWidget):
         header.setStyleSheet("font-size: 16px; font-weight: bold; padding: 5px;")
         layout.addWidget(header)
 
-        subtitle = QLabel("Export reports by folder to a single ZIP file. Works on any org!")
+        subtitle = QLabel("Export reports by folder or select specific reports. Works on any org!")
         subtitle.setStyleSheet("color: #666; padding-bottom: 10px;")
         layout.addWidget(subtitle)
 
@@ -120,45 +126,21 @@ class MainWindow(QWidget):
         login_group.setLayout(login_layout)
         layout.addWidget(login_group)
 
-        # === FOLDER SELECTION SECTION ===
-        folder_group = QGroupBox("2. Select Report Folder")
-        folder_layout = QVBoxLayout()
+        # === EXPORT MODE TABS ===
+        self.export_tabs = QTabWidget()
+        self.export_tabs.setEnabled(False)  # Disabled until login
         
-        # Search box
-        search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel("Search:"))
-        self.folder_search = QLineEdit()
-        self.folder_search.setPlaceholderText("Type to filter folders...")
-        self.folder_search.textChanged.connect(self._on_search_changed)
-        self.folder_search.setEnabled(False)
-        search_layout.addWidget(self.folder_search, 1)
-        folder_layout.addLayout(search_layout)
+        # Tab 1: Export by Folder
+        self.folder_tab = self._create_folder_tab()
+        self.export_tabs.addTab(self.folder_tab, "📁 Export by Folder")
         
-        # Folder dropdown with refresh button
-        folder_combo_layout = QHBoxLayout()
-        self.folder_combo = QComboBox()
-        self.folder_combo.addItem("Please login first", None)
-        self.folder_combo.setEnabled(False)
-        self.folder_combo.setMaxVisibleItems(10)  # Show max 10 items, rest scrollable
-        self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
-        folder_combo_layout.addWidget(self.folder_combo, 1)
+        # Tab 2: Export Selected Reports
+        self.selected_tab = self._create_selected_reports_tab()
+        self.export_tabs.addTab(self.selected_tab, "☑️ Export Selected Reports")
         
-        self.refresh_folders_btn = QPushButton("Refresh")
-        self.refresh_folders_btn.setEnabled(False)
-        self.refresh_folders_btn.clicked.connect(self.on_refresh_folders)
-        folder_combo_layout.addWidget(self.refresh_folders_btn)
-        
-        folder_layout.addLayout(folder_combo_layout)
-        
-        self.folder_info_label = QLabel("Please login to see available folders")
-        self.folder_info_label.setStyleSheet("color: #888; font-size: 11px;")
-        self.folder_info_label.setWordWrap(True)
-        folder_layout.addWidget(self.folder_info_label)
-        
-        folder_group.setLayout(folder_layout)
-        layout.addWidget(folder_group)
+        layout.addWidget(self.export_tabs)
 
-        # === OUTPUT SECTION ===
+        # === OUTPUT SECTION (Shared) ===
         output_group = QGroupBox("3. Output Location")
         output_layout = QHBoxLayout()
         self.path_label = QLabel("No file selected")
@@ -171,7 +153,7 @@ class MainWindow(QWidget):
         output_group.setLayout(output_layout)
         layout.addWidget(output_group)
 
-        # === EXPORT SECTION ===
+        # === EXPORT SECTION (Shared) ===
         export_group = QGroupBox("4. Export")
         export_layout = QVBoxLayout()
 
@@ -210,6 +192,111 @@ class MainWindow(QWidget):
         self.log.setMaximumHeight(120)
         self.log.setStyleSheet("font-family: Consolas, Monaco, monospace; font-size: 11px;")
         layout.addWidget(self.log)
+
+    def _create_folder_tab(self):
+        """Create the folder-based export tab"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        folder_group = QGroupBox("Select Report Folder")
+        folder_layout = QVBoxLayout()
+        
+        # Search box
+        search_layout = QHBoxLayout()
+        search_layout.addWidget(QLabel("Search:"))
+        self.folder_search = QLineEdit()
+        self.folder_search.setPlaceholderText("Type to filter folders...")
+        self.folder_search.textChanged.connect(self._on_search_changed)
+        self.folder_search.setEnabled(False)
+        search_layout.addWidget(self.folder_search, 1)
+        folder_layout.addLayout(search_layout)
+        
+        # Folder dropdown with refresh button
+        folder_combo_layout = QHBoxLayout()
+        self.folder_combo = QComboBox()
+        self.folder_combo.addItem("Please login first", None)
+        self.folder_combo.setEnabled(False)
+        self.folder_combo.setMaxVisibleItems(10)
+        self.folder_combo.currentIndexChanged.connect(self._on_folder_changed)
+        folder_combo_layout.addWidget(self.folder_combo, 1)
+        
+        self.refresh_folders_btn = QPushButton("Refresh")
+        self.refresh_folders_btn.setEnabled(False)
+        self.refresh_folders_btn.clicked.connect(self.on_refresh_folders)
+        folder_combo_layout.addWidget(self.refresh_folders_btn)
+        
+        folder_layout.addLayout(folder_combo_layout)
+        
+        self.folder_info_label = QLabel("Please login to see available folders")
+        self.folder_info_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.folder_info_label.setWordWrap(True)
+        folder_layout.addWidget(self.folder_info_label)
+        
+        folder_group.setLayout(folder_layout)
+        layout.addWidget(folder_group)
+        layout.addStretch()
+        
+        return tab
+
+    def _create_selected_reports_tab(self):
+        """Create the selected reports export tab"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Top controls
+        controls_layout = QHBoxLayout()
+        
+        # Search box
+        self.report_search = QLineEdit()
+        self.report_search.setPlaceholderText("🔍 Search reports...")
+        self.report_search.textChanged.connect(self._on_report_search_changed)
+        self.report_search.setEnabled(False)
+        controls_layout.addWidget(self.report_search, 1)
+        
+        # Refresh button
+        self.refresh_reports_btn = QPushButton("🔄 Refresh")
+        self.refresh_reports_btn.setEnabled(False)
+        self.refresh_reports_btn.clicked.connect(self.on_refresh_reports)
+        controls_layout.addWidget(self.refresh_reports_btn)
+        
+        # Select/Deselect All buttons
+        self.select_all_btn = QPushButton("✓ Select All")
+        self.select_all_btn.setEnabled(False)
+        self.select_all_btn.clicked.connect(self.on_select_all_reports)
+        controls_layout.addWidget(self.select_all_btn)
+        
+        self.deselect_all_btn = QPushButton("✗ Clear All")
+        self.deselect_all_btn.setEnabled(False)
+        self.deselect_all_btn.clicked.connect(self.on_deselect_all_reports)
+        controls_layout.addWidget(self.deselect_all_btn)
+        
+        layout.addLayout(controls_layout)
+        
+        # Selection counter
+        self.selection_counter = QLabel("Selected: 0 reports")
+        self.selection_counter.setStyleSheet("font-weight: bold; color: #0070d2; padding: 5px;")
+        layout.addWidget(self.selection_counter)
+        
+        # Scrollable report list
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(250)
+        
+        self.reports_container = QWidget()
+        self.reports_layout = QVBoxLayout(self.reports_container)
+        self.reports_layout.setAlignment(Qt.AlignTop)
+        self.reports_layout.setSpacing(2)
+        
+        # Placeholder
+        placeholder = QLabel("Please login to load reports")
+        placeholder.setStyleSheet("color: #888; padding: 20px;")
+        placeholder.setAlignment(Qt.AlignCenter)
+        self.reports_layout.addWidget(placeholder)
+        
+        scroll_area.setWidget(self.reports_container)
+        layout.addWidget(scroll_area)
+        
+        return tab
 
     def _on_custom_domain_toggle(self, checked):
         self.custom_domain_input.setEnabled(checked)
@@ -252,12 +339,16 @@ class MainWindow(QWidget):
             self._log(f"User: {user_name}")
         
         self._set_inputs_enabled(True)
+        self.export_tabs.setEnabled(True)
         
-        # Load folders automatically after login
+        # Load folders and reports automatically
         self._log("Loading report folders...")
         self.folder_combo.setEnabled(False)
         self.folder_info_label.setText("Loading folders...")
         self.on_refresh_folders()
+        
+        self._log("Loading all reports...")
+        self.on_refresh_reports()
 
     @Slot(str)
     def _on_login_error(self, error: str):
@@ -269,7 +360,6 @@ class MainWindow(QWidget):
 
     @Slot(list)
     def _on_folders_loaded(self, folders: list):
-        # Filter out "Automated Process" and other system folders
         filtered_folders = [
             f for f in folders 
             if f.get("name") and f.get("name") not in ["Automated Process", "System", "Hidden"]
@@ -283,9 +373,7 @@ class MainWindow(QWidget):
         self.refresh_folders_btn.setEnabled(True)
         self._update_buttons()
     
-    
     def _populate_folder_combo(self, folders: list, search_term: str = ""):
-        """Populate folder combo with filtered results"""
         self.folder_combo.clear()
         
         if not folders:
@@ -294,7 +382,6 @@ class MainWindow(QWidget):
             self.folder_combo.setEnabled(False)
             return
         
-        # Filter by search term if provided
         if search_term:
             folders = [
                 f for f in folders 
@@ -307,17 +394,14 @@ class MainWindow(QWidget):
             self.folder_info_label.setText(f"No matches for '{search_term}'")
             return
         
-        # Add "All Reports" option first (always show unless searching)
         if not search_term:
-            self.folder_combo.addItem("📁 All Reports (All Folders)", "ALL")
+            self.folder_combo.addItem("📚 All Reports (All Folders)", "ALL")
         
-        # Add individual folders
         for folder in folders:
             folder_name = folder.get("name", "Unnamed")
             folder_id = folder.get("id")
             folder_type = folder.get("type", "")
             
-            # Add icon based on folder type
             icon = "📂"
             if folder_type == "Public":
                 icon = "🌐"
@@ -337,7 +421,6 @@ class MainWindow(QWidget):
     
     @Slot()
     def _on_search_changed(self):
-        """Handle search box text changes"""
         search_term = self.folder_search.text().strip()
         self._populate_folder_combo(self.available_folders, search_term)
 
@@ -358,49 +441,157 @@ class MainWindow(QWidget):
         if current_data:
             if current_data == "ALL":
                 self.folder_info_label.setText("Will export all reports from all folders")
-                self.selected_folder_name = "All_Reports"  # Store for later
+                self.selected_folder_name = "All_Reports"
             else:
-                # Extract folder name (remove emoji icon)
                 folder_name = current_text.split(" ", 1)[1] if " " in current_text else current_text
                 self.folder_info_label.setText(f"Selected: {folder_name}")
-                self.selected_folder_name = folder_name  # Store for later
+                self.selected_folder_name = folder_name
             
-            # Update ZIP name if already selected
             if self.output_zip:
                 self._update_zip_name(self.selected_folder_name)
         
         self._update_buttons()
     
-    def _update_zip_name(self, folder_name: str):
-        """
-        Update the output ZIP filename to include the folder name.
+    # NEW: Report selection methods
+    @Slot(list)
+    def _on_reports_loaded(self, reports: list):
+        self.available_reports = reports
+        self._populate_reports_list(reports)
         
-        Args:
-            folder_name: The folder name to include in the ZIP filename
-        """
+        self.report_search.setEnabled(True)
+        self.refresh_reports_btn.setEnabled(True)
+        self.select_all_btn.setEnabled(True)
+        self.deselect_all_btn.setEnabled(True)
+        
+        self._log(f"Loaded {len(reports)} reports")
+        self._update_buttons()
+    
+    @Slot(str)
+    def _on_reports_error(self, error: str):
+        self._log(f"Error loading reports: {error}")
+        QMessageBox.warning(self, "Error", f"Failed to load reports: {error}")
+    
+    def _populate_reports_list(self, reports: list, search_term: str = ""):
+        # Clear existing checkboxes
+        while self.reports_layout.count():
+            child = self.reports_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        if not reports:
+            placeholder = QLabel("No reports found")
+            placeholder.setStyleSheet("color: #888; padding: 20px;")
+            placeholder.setAlignment(Qt.AlignCenter)
+            self.reports_layout.addWidget(placeholder)
+            return
+        
+        # Filter by search term
+        filtered_reports = reports
+        if search_term:
+            filtered_reports = [
+                r for r in reports
+                if search_term.lower() in r.get("name", "").lower()
+            ]
+        
+        if not filtered_reports:
+            placeholder = QLabel(f"No reports matching '{search_term}'")
+            placeholder.setStyleSheet("color: #888; padding: 20px;")
+            placeholder.setAlignment(Qt.AlignCenter)
+            self.reports_layout.addWidget(placeholder)
+            return
+        
+        # Add checkboxes for each report
+        for report in filtered_reports:
+            report_id = report.get("id")
+            report_name = report.get("name", "Unnamed Report")
+            folder_name = report.get("folderName", "Unknown Folder")
+            
+            checkbox = QCheckBox(f"{report_name} ({folder_name})")
+            checkbox.setProperty("report_id", report_id)
+            checkbox.setProperty("report_name", report_name)
+            
+            # Restore selection state
+            if report_id in self.selected_reports:
+                checkbox.setChecked(True)
+            
+            checkbox.stateChanged.connect(self._on_report_checkbox_changed)
+            self.reports_layout.addWidget(checkbox)
+        
+        self._update_selection_counter()
+    
+    @Slot()
+    def _on_report_checkbox_changed(self):
+        sender = self.sender()
+        report_id = sender.property("report_id")
+        
+        if sender.isChecked():
+            self.selected_reports.add(report_id)
+        else:
+            self.selected_reports.discard(report_id)
+        
+        self._update_selection_counter()
+        self._update_buttons()
+    
+    @Slot()
+    def _on_report_search_changed(self):
+        search_term = self.report_search.text().strip()
+        self._populate_reports_list(self.available_reports, search_term)
+    
+    @Slot()
+    def on_select_all_reports(self):
+        # Get currently visible reports (after search filter)
+        search_term = self.report_search.text().strip()
+        filtered_reports = self.available_reports
+        if search_term:
+            filtered_reports = [
+                r for r in self.available_reports
+                if search_term.lower() in r.get("name", "").lower()
+            ]
+        
+        # Add all visible reports to selection
+        for report in filtered_reports:
+            self.selected_reports.add(report.get("id"))
+        
+        # Update UI
+        self._populate_reports_list(self.available_reports, search_term)
+        self._update_buttons()
+    
+    @Slot()
+    def on_deselect_all_reports(self):
+        self.selected_reports.clear()
+        search_term = self.report_search.text().strip()
+        self._populate_reports_list(self.available_reports, search_term)
+        self._update_buttons()
+    
+    def _update_selection_counter(self):
+        count = len(self.selected_reports)
+        self.selection_counter.setText(f"Selected: {count} report{'s' if count != 1 else ''}")
+        
+        if count > 0:
+            self.selection_counter.setStyleSheet("font-weight: bold; color: #0070d2; padding: 5px;")
+        else:
+            self.selection_counter.setStyleSheet("font-weight: bold; color: #888; padding: 5px;")
+    
+    def _update_zip_name(self, folder_name: str):
         if not self.output_zip:
             return
         
-        # Get the directory and base filename
         directory = os.path.dirname(self.output_zip)
         
-        # Sanitize folder name for filename
         safe_folder_name = "".join(c if c.isalnum() or c in " ._-" else "_" for c in folder_name)
         safe_folder_name = safe_folder_name.strip("_ ").replace(" ", "_")
         
-        # Generate timestamp
-        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+        if not safe_folder_name:
+            safe_folder_name = "reports"
         
-        # Create new filename
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
         new_filename = f"salesforce_reports_{safe_folder_name}_{timestamp}.zip"
         
-        # Combine with directory
         if directory:
             self.output_zip = os.path.join(directory, new_filename)
         else:
             self.output_zip = new_filename
         
-        # Update UI
         display = self.output_zip if len(self.output_zip) < 50 else "..." + self.output_zip[-47:]
         self.path_label.setText(display)
         self.path_label.setToolTip(self.output_zip)
@@ -420,12 +611,23 @@ class MainWindow(QWidget):
         self._update_buttons()
 
     def _update_buttons(self):
-        can_export = (
-            self.session_info is not None
-            and self.output_zip is not None
-            and not self._export_running
-            and self.folder_combo.currentData() is not None
-        )
+        current_tab = self.export_tabs.currentIndex()
+        
+        if current_tab == 0:  # Folder mode
+            can_export = (
+                self.session_info is not None
+                and self.output_zip is not None
+                and not self._export_running
+                and self.folder_combo.currentData() is not None
+            )
+        else:  # Selected reports mode
+            can_export = (
+                self.session_info is not None
+                and self.output_zip is not None
+                and not self._export_running
+                and len(self.selected_reports) > 0
+            )
+        
         self.start_btn.setEnabled(can_export)
 
     @Slot()
@@ -448,7 +650,6 @@ class MainWindow(QWidget):
         self.status_label.setStyleSheet("color: #666;")
         self._log("Authenticating...")
 
-        # Determine domain
         if self.custom_domain_check.isChecked():
             domain = self.custom_domain_input.text().strip()
             if not domain:
@@ -495,13 +696,43 @@ class MainWindow(QWidget):
             self.signals.folders_loaded.emit(folders)
         except Exception as e:
             self.signals.folders_error.emit(str(e))
+    
+    @Slot()
+    def on_refresh_reports(self):
+        if not self.session_info:
+            return
+        
+        self.refresh_reports_btn.setEnabled(False)
+        self.report_search.setEnabled(False)
+        self.select_all_btn.setEnabled(False)
+        self.deselect_all_btn.setEnabled(False)
+        
+        # Clear selections on refresh
+        self.selected_reports.clear()
+        self._update_selection_counter()
+        
+        thread = threading.Thread(target=self._load_reports_worker, daemon=True)
+        thread.start()
+    
+    def _load_reports_worker(self):
+        try:
+            session_id = self.session_info.get("session_id")
+            instance_url = self.session_info.get("instance_url")
+            
+            exporter = SalesforceReportExporter(session_id, instance_url)
+            reports = exporter.list_reports()  # Get all reports
+            self.signals.reports_loaded.emit(reports)
+        except Exception as e:
+            self.signals.reports_error.emit(str(e))
 
     @Slot()
     def choose_path(self):
-        # Use the currently selected folder name in default filename
         timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
         safe_folder = "".join(c if c.isalnum() or c in " ._-" else "_" for c in self.selected_folder_name)
         safe_folder = safe_folder.strip("_ ").replace(" ", "_")
+        
+        if not safe_folder:
+            safe_folder = "reports"
         
         default = f"salesforce_reports_{safe_folder}_{timestamp}.zip"
         
@@ -512,7 +743,6 @@ class MainWindow(QWidget):
             if not path.lower().endswith('.zip'):
                 path += '.zip'
             self.output_zip = path
-            # Show shortened path
             display = path if len(path) < 50 else "..." + path[-47:]
             self.path_label.setText(display)
             self.path_label.setStyleSheet("color: green;")
@@ -529,30 +759,52 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "No Output", "Please select output location.")
             return
         
-        selected_folder_id = self.folder_combo.currentData()
-        if not selected_folder_id:
-            QMessageBox.warning(self, "No Folder Selected", "Please select a folder to export.")
-            return
-
-        self._export_running = True
-        self._set_inputs_enabled(False)
-        self.progress.setValue(0)
-        self.progress.setFormat("Starting...")
+        current_tab = self.export_tabs.currentIndex()
         
-        folder_name = self.folder_combo.currentText()
-        if selected_folder_id == "ALL":
-            self._log("Starting export of ALL reports from ALL folders...")
-        else:
-            self._log(f"Starting export from folder: {folder_name}")
+        if current_tab == 0:  # Folder mode
+            selected_folder_id = self.folder_combo.currentData()
+            if not selected_folder_id:
+                QMessageBox.warning(self, "No Folder Selected", "Please select a folder to export.")
+                return
+            
+            self._export_running = True
+            self._set_inputs_enabled(False)
+            self.progress.setValue(0)
+            self.progress.setFormat("Starting...")
+            
+            folder_name = self.folder_combo.currentText()
+            if selected_folder_id == "ALL":
+                self._log("Starting export of ALL reports from ALL folders...")
+            else:
+                self._log(f"Starting export from folder: {folder_name}")
+            
+            thread = threading.Thread(
+                target=self._export_worker_folder,
+                args=(selected_folder_id,),
+                daemon=True
+            )
+            thread.start()
+        
+        else:  # Selected reports mode
+            if len(self.selected_reports) == 0:
+                QMessageBox.warning(self, "No Reports Selected", "Please select at least one report.")
+                return
+            
+            self._export_running = True
+            self._set_inputs_enabled(False)
+            self.progress.setValue(0)
+            self.progress.setFormat("Starting...")
+            
+            self._log(f"Starting export of {len(self.selected_reports)} selected reports...")
+            
+            thread = threading.Thread(
+                target=self._export_worker_selected,
+                args=(list(self.selected_reports),),
+                daemon=True
+            )
+            thread.start()
 
-        thread = threading.Thread(
-            target=self._export_worker,
-            args=(selected_folder_id,),
-            daemon=True
-        )
-        thread.start()
-
-    def _export_worker(self, folder_id):
+    def _export_worker_folder(self, folder_id):
         try:
             session_id = self.session_info.get("session_id")
             instance_url = self.session_info.get("instance_url")
@@ -575,6 +827,27 @@ class MainWindow(QWidget):
             self.signals.finished.emit(result)
         except Exception as e:
             self.signals.error.emit(str(e))
+    
+    def _export_worker_selected(self, report_ids):
+        try:
+            session_id = self.session_info.get("session_id")
+            instance_url = self.session_info.get("instance_url")
+
+            def progress_cb(done, total):
+                self.signals.progress.emit(done, total)
+
+            exporter = SalesforceReportExporter(
+                session_id, instance_url, progress_callback=progress_cb
+            )
+            
+            result = exporter.export_selected_reports_to_zip(
+                self.output_zip,
+                report_ids
+            )
+            
+            self.signals.finished.emit(result)
+        except Exception as e:
+            self.signals.error.emit(str(e))
 
     @Slot(dict)
     def _on_export_finished(self, result: dict):
@@ -582,7 +855,7 @@ class MainWindow(QWidget):
         total = result.get("total", 0)
         failed = result.get("failed", [])
         zip_path = result.get("zip", "")
-        folder_name = result.get("folder_name", "selected folder")
+        folder_name = result.get("folder_name", "selected reports")
 
         self.progress.setFormat(f"Done! {total} reports")
         self._log(f"Export completed: {total} reports from {folder_name}, {len(failed)} failed")
@@ -597,7 +870,7 @@ class MainWindow(QWidget):
         self._set_inputs_enabled(True)
         QMessageBox.information(
             self, "Export Complete",
-            f"ZIP saved to:\n{zip_path}\n\nFolder: {folder_name}\nTotal: {total} reports\nFailed: {len(failed)}"
+            f"ZIP saved to:\n{zip_path}\n\nSource: {folder_name}\nTotal: {total} reports\nFailed: {len(failed)}"
         )
 
     @Slot(str)

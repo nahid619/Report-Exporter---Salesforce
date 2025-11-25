@@ -646,6 +646,132 @@ class SalesforceReportExporter:
                 shutil.rmtree(tmp_dir)
             except Exception:
                 pass
+    # ADD THIS METHOD TO exporter.py (SalesforceReportExporter class)
+    # Place it after export_reports_by_folder_to_zip method
+
+    def export_selected_reports_to_zip(
+        self,
+        output_zip_path: str,
+        report_ids: List[str],
+        delay_between_reports: float = 0.5
+    ) -> Dict[str, Any]:
+        """
+        Export specific selected reports to a ZIP file.
+        
+        Args:
+            output_zip_path: Path where ZIP file will be saved
+            report_ids: List of report IDs to export
+            delay_between_reports: Seconds to wait between exports (rate limiting)
+            
+        Returns:
+            Dictionary with export results
+        """
+        tmp_dir = Path(tempfile.mkdtemp(prefix="sf_reports_"))
+
+        try:
+            # Step 1: Get full report details for selected IDs
+            all_reports = self.list_reports()
+            reports = [r for r in all_reports if r.get("id") in report_ids]
+            
+            total = len(reports)
+            completed = 0
+            failed: List[Dict[str, Any]] = []
+            successful: List[str] = []
+
+            if total == 0:
+                with zipfile.ZipFile(output_zip_path, "w") as zf:
+                    zf.writestr("_README.txt", "No reports found with the selected IDs")
+                return {
+                    "zip": output_zip_path,
+                    "total": 0,
+                    "failed": [],
+                    "successful": [],
+                    "folder_name": "Selected Reports",
+                    "api_version": self.api_version
+                }
+
+            used_filenames: Dict[str, int] = {}
+
+            # Step 2: Export each selected report
+            for report in reports:
+                report_id = report.get("id")
+                report_name = report.get("name") or report_id
+                report_type = report.get("reportFormat", "TABULAR")
+
+                base_name = safe_filename(report_name)
+                if base_name in used_filenames:
+                    used_filenames[base_name] += 1
+                    filename = f"{base_name}_{used_filenames[base_name]}.csv"
+                else:
+                    used_filenames[base_name] = 1
+                    filename = f"{base_name}.csv"
+
+                csv_path = tmp_dir / filename
+
+                try:
+                    csv_content = self.export_report_csv(report_id)
+                    
+                    if not csv_content or len(csv_content.strip()) == 0:
+                        raise Exception("Empty response received")
+                    
+                    first_line = csv_content.split('\n')[0] if csv_content else ""
+                    if 'Error' in first_line and len(csv_content) < 500:
+                        raise Exception(f"Salesforce error: {first_line[:100]}")
+                    
+                    csv_path.write_text(csv_content, encoding="utf-8")
+                    successful.append(report_name)
+
+                except Exception as e:
+                    error_msg = str(e)
+                    failed.append({
+                        "id": report_id,
+                        "name": report_name,
+                        "type": report_type,
+                        "error": error_msg
+                    })
+                    error_content = (
+                        f"# Failed to export report\n"
+                        f"# Report Name: {report_name}\n"
+                        f"# Report ID: {report_id}\n"
+                        f"# Report Type: {report_type}\n"
+                        f"# Error: {error_msg}\n"
+                    )
+                    csv_path.write_text(error_content, encoding="utf-8")
+
+                completed += 1
+                
+                if self.progress_callback:
+                    try:
+                        self.progress_callback(completed, total)
+                    except Exception:
+                        pass
+
+                if delay_between_reports > 0 and completed < total:
+                    time.sleep(delay_between_reports)
+
+            # Step 3: Create ZIP file
+            with zipfile.ZipFile(output_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for file_path in sorted(tmp_dir.iterdir()):
+                    if file_path.is_file():
+                        zf.write(file_path, arcname=file_path.name)
+                
+                summary = self._create_summary(total, successful, failed, "Selected Reports")
+                zf.writestr("_EXPORT_SUMMARY.txt", summary)
+
+            return {
+                "zip": output_zip_path,
+                "total": total,
+                "failed": failed,
+                "successful": successful,
+                "folder_name": "Selected Reports",
+                "api_version": self.api_version
+            }
+
+        finally:
+            try:
+                shutil.rmtree(tmp_dir)
+            except Exception:
+                pass
 
     def _get_folder_name(self, folder_id: str) -> str:
         """Get the name of a folder by its ID"""
