@@ -282,9 +282,12 @@ class SalesforceReportExporter:
         except Exception as e:
             raise Exception(f"Failed to fetch report folders: {str(e)}")
 
+    # exporter.py - COMPLETE FIX with SOQL Query Method
+    # This replaces the list_reports method with a more reliable approach
+
     def list_reports(self, folder_id: str = None) -> List[Dict[str, Any]]:
         """
-        Fetch list of all available reports using REST API.
+        Fetch list of all available reports using REST API or SOQL query.
         
         Args:
             folder_id: Optional folder ID to filter reports. If None, returns all reports.
@@ -292,6 +295,11 @@ class SalesforceReportExporter:
         Returns:
             List of report metadata (id, name, format, folder, etc.)
         """
+        # If folder_id is specified, use SOQL query for accurate filtering
+        if folder_id:
+            return self._list_reports_by_soql(folder_id)
+        
+        # Otherwise use the standard REST API endpoint
         url = f"{self.instance_url}{self.reports_list_endpoint}"
         response = retry_request(url, headers=self.api_headers, timeout=60)
         
@@ -304,11 +312,62 @@ class SalesforceReportExporter:
         else:
             reports = []
         
-        # Filter by folder if specified
-        if folder_id:
-            reports = [r for r in reports if r.get("folderId") == folder_id]
-        
         return reports
+
+    def _list_reports_by_soql(self, folder_id: str) -> List[Dict[str, Any]]:
+        """
+        Use SOQL query to get reports by folder ID.
+        This is more reliable than filtering REST API results.
+        
+        Args:
+            folder_id: The Salesforce folder ID to query
+            
+        Returns:
+            List of report metadata in the same format as list_reports()
+        """
+        try:
+            # SOQL query to get reports in specific folder
+            query = f"""
+                SELECT Id, Name, DeveloperName, FolderName, Format, CreatedDate, LastModifiedDate
+                FROM Report 
+                WHERE OwnerId = '{folder_id}'
+                ORDER BY Name
+            """
+            
+            query_url = f"{self.instance_url}/services/data/{self.api_version}/query"
+            params = {"q": query}
+            
+            response = requests.get(
+                query_url,
+                headers=self.api_headers,
+                params=params,
+                timeout=60
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            records = data.get("records", [])
+            
+            # Convert SOQL results to match REST API format
+            reports = []
+            for record in records:
+                reports.append({
+                    "id": record.get("Id"),
+                    "name": record.get("Name"),
+                    "developerName": record.get("DeveloperName"),
+                    "folderName": record.get("FolderName"),
+                    "reportFormat": record.get("Format", "TABULAR"),
+                    "lastModifiedDate": record.get("LastModifiedDate"),
+                    "createdDate": record.get("CreatedDate")
+                })
+            
+            print(f"Found {len(reports)} reports in folder {folder_id}")
+            return reports
+            
+        except Exception as e:
+            print(f"Error querying reports by folder: {str(e)}")
+            # Fall back to empty list rather than crashing
+            return []
 
     def export_report_csv(self, report_id: str, timeout: int = 120) -> str:
         """
