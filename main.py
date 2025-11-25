@@ -1,5 +1,6 @@
 # main.py
 # Universal Salesforce Report Exporter - Works on ANY org without Connected App
+import os
 import sys
 import threading
 import traceback
@@ -38,6 +39,7 @@ class MainWindow(QWidget):
         self.output_zip = None
         self._export_running = False
         self.available_folders = []
+        self.selected_folder_name = "All_Reports" 
 
     def _connect_signals(self):
         self.signals.progress.connect(self._on_progress)
@@ -356,13 +358,55 @@ class MainWindow(QWidget):
         if current_data:
             if current_data == "ALL":
                 self.folder_info_label.setText("Will export all reports from all folders")
+                self.selected_folder_name = "All_Reports"  # Store for later
             else:
-                # Count reports in this folder
-                count = sum(1 for f in self.available_folders if f.get("id") == current_data)
+                # Extract folder name (remove emoji icon)
                 folder_name = current_text.split(" ", 1)[1] if " " in current_text else current_text
                 self.folder_info_label.setText(f"Selected: {folder_name}")
+                self.selected_folder_name = folder_name  # Store for later
+            
+            # Update ZIP name if already selected
+            if self.output_zip:
+                self._update_zip_name(self.selected_folder_name)
         
         self._update_buttons()
+    
+    def _update_zip_name(self, folder_name: str):
+        """
+        Update the output ZIP filename to include the folder name.
+        
+        Args:
+            folder_name: The folder name to include in the ZIP filename
+        """
+        if not self.output_zip:
+            return
+        
+        # Get the directory and base filename
+        import os
+        directory = os.path.dirname(self.output_zip)
+        
+        # Sanitize folder name for filename
+        safe_folder_name = "".join(c if c.isalnum() or c in " ._-" else "_" for c in folder_name)
+        safe_folder_name = safe_folder_name.strip("_ ").replace(" ", "_")
+        
+        # Generate timestamp
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+        
+        # Create new filename
+        new_filename = f"salesforce_reports_{safe_folder_name}_{timestamp}.zip"
+        
+        # Combine with directory
+        if directory:
+            self.output_zip = os.path.join(directory, new_filename)
+        else:
+            self.output_zip = new_filename
+        
+        # Update UI
+        display = self.output_zip if len(self.output_zip) < 50 else "..." + self.output_zip[-47:]
+        self.path_label.setText(display)
+        self.path_label.setToolTip(self.output_zip)
+        
+        self._log(f"Output filename updated: {new_filename}")
 
     def _set_inputs_enabled(self, enabled: bool):
         self.username_input.setEnabled(enabled)
@@ -455,7 +499,13 @@ class MainWindow(QWidget):
 
     @Slot()
     def choose_path(self):
-        default = f"salesforce_reports_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.zip"
+        # Use the currently selected folder name in default filename
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+        safe_folder = "".join(c if c.isalnum() or c in " ._-" else "_" for c in self.selected_folder_name)
+        safe_folder = safe_folder.strip("_ ").replace(" ", "_")
+        
+        default = f"salesforce_reports_{safe_folder}_{timestamp}.zip"
+        
         path, _ = QFileDialog.getSaveFileName(
             self, "Save ZIP File", default, "ZIP files (*.zip)"
         )
